@@ -1,0 +1,50 @@
+name: C/C++ CI
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+jobs:
+  build:
+
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v4
+    - name: configure
+      run: ./configure
+    - name: make
+      run: make
+    - name: make check
+      run: make check
+    - name: make distcheck
+      run: make distcheck
+// source/emulator/src/Graphics/ShaderSpirv.cpp
+
+#include "ShaderConverter.h"
+
+// PS5自定义着色器微码转译入口
+bool ConvertPS5ShaderToHost(const PS5ShaderMicrocode& ps5Shader, 
+                            HostShaderOutput* outShader,
+                            GPUVendor vendor) {
+    spvtools::Optimizer opt(SPV_ENV_VULKAN_1_1);
+    // 针对不同厂商GPU做差异化优化
+    switch(vendor) {
+        case GPU_INTEL:
+            // 修复英特尔Arc显卡不支持的扩展指令
+            opt.RegisterPass(spvtools::CreateRemoveIntelSpecificInstPass());
+            opt.RegisterPass(spvtools::CreateReduceLocalSizePass(64));
+            break;
+        case GPU_AMD:
+            // 适配AMD RDNA架构的着色器寄存器分配规则
+            opt.RegisterPass(spvtools::CreateAmdOptimizationPass());
+            opt.RegisterPass(spvtools::CreateForceWaveSizePass(64));
+            break;
+        default: // NVIDIA默认路径
+            opt.RegisterPass(spvtools::CreateCommonOptimizationPass());
+    }
+    // 执行转译
+    return opt.Run(ps5Shader.code.data(), ps5Shader.code.size(),
+                   &outShader->translatedCode);
